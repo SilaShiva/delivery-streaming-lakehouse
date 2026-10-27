@@ -79,6 +79,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rate", type=float, default=50, help="base orders/sec")
     ap.add_argument("--chaos", action="store_true", help="late events + duplicates")
+    ap.add_argument("--no-json-mirror", action="store_true",
+                    help="skip the orders-json mirror topic (Flink jobs read it)")
     args = ap.parse_args()
 
     schema_id, schema_json = fetch_schema("orders-value")
@@ -98,8 +100,16 @@ def main() -> None:
             payload = avro_encode(schema_id, schema, ev)
             key = ev["order_id"].encode()
             producer.produce("orders", key=key, value=payload)
+            if not args.no_json_mirror:
+                # Flink jobs consume this mirror; the Avro topic stays the
+                # schema-governed source of truth for Schema Registry demos (D10)
+                producer.produce("orders-json", key=key,
+                                 value=json.dumps(ev, default=str).encode())
             if args.chaos and random.random() < 0.02:
                 producer.produce("orders", key=key, value=payload)  # dupe: retry lookalike
+                if not args.no_json_mirror:
+                    producer.produce("orders-json", key=key,
+                                     value=json.dumps(ev, default=str).encode())
         producer.poll(0)
         total += n_events
         if total % 500 < n_events:

@@ -1,5 +1,6 @@
-# Host-side Python deps (run inside a 3.11 venv — PyFlink doesn't support 3.14).
-# Flink jobs themselves run inside the Flink containers, not on the host.
+# Host-side Python deps.
+# Flink jobs run through PyFlink's TableEnvironment (submit_sql_windows.py);
+# the DataStream walkthrough is reference-only on this Windows-native stack.
 
 fastavro>=1.9
 requests>=2.31
@@ -7,3 +8,6 @@ confluent-kafka>=2.3
 duckdb>=1.0
 dagster>=1.7
 dbt-duckdb>=1.8
+# PyFlink on Windows: only the Table API path is exercised here (D11).
+# Install pinned: apache-flink==1.19.1 requires Java 17 on PATH.
+apache-flink==1.19.1 ; sys_platform != 'darwin'

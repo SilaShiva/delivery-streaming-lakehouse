@@ -1,13 +1,18 @@
 """Create Kafka topics and register Avro schemas.
 
-Run once after `docker compose up -d`:
+Run once after scripts\\start_stack.ps1:
     python producer/setup_topics.py
+
+Topic creation shells out to kafka-topics.bat from the local Kafka install
+(native Windows stack — no containers), so runtimes.env.ps1 must exist
+(scripts\\download_runtimes.ps1 creates it).
 """
 
 from __future__ import annotations
 
 import json
 import pathlib
+import subprocess
 import sys
 import time
 
@@ -16,11 +21,15 @@ import requests
 KAFKA_BOOTSTRAP = "localhost:9092"
 SCHEMA_REGISTRY = "http://localhost:8081"
 
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
 TOPICS = {
-    "orders": {"num_partitions": 3, "replication_factor": 1},
-    "rider-locations": {"num_partitions": 3, "replication_factor": 1},
-    "restaurant-updates": {"num_partitions": 1, "replication_factor": 1},
-    "live-metrics": {"num_partitions": 3, "replication_factor": 1},
+    "orders": {"num_partitions": 3},
+    "orders-json": {"num_partitions": 3},
+    "rider-locations": {"num_partitions": 3},
+    "restaurant-updates": {"num_partitions": 1},
+    "live-metrics": {"num_partitions": 3},
+    "late-orders": {"num_partitions": 1},
 }
 
 SCHEMA_DIR = pathlib.Path(__file__).parent / "schemas"
@@ -29,27 +38,41 @@ SUBJECTS = {
     "rider-locations-value": "rider_location.avsc",
 }
 
+RETENTION_MS = "604800000"  # 7 days — replay window for backfills (D9)
+
+
+def kafka_topics_bat() -> pathlib.Path:
+    env_file = REPO_ROOT / "scripts" / "runtimes.env.ps1"
+    if not env_file.exists():
+        sys.exit("scripts/runtimes.env.ps1 not found — run scripts/download_runtimes.ps1 first")
+    env = {}
+    for line in env_file.read_text().splitlines():
+        line = line.strip().lstrip("$")
+        if "=" in line:
+            k, v = line.split("=", 1)
+            env[k] = v.strip('"')
+    bat = pathlib.Path(env["KAFKA_HOME"]) / "bin" / "windows" / "kafka-topics.bat"
+    if not bat.exists():
+        sys.exit(f"kafka-topics.bat not found at {bat}")
+    return bat
+
 
 def create_topics() -> None:
-    """Create topics via the Kafka admin HTTP-less route: kafka-topics.sh in the broker container.
-
-    Kept as a subprocess call so the host machine needs no kafka-python admin API
-    (which historically lags broker versions)."""
-    import subprocess
-
+    bat = kafka_topics_bat()
     for topic, cfg in TOPICS.items():
         subprocess.run(
             [
-                "docker", "exec", "dsl-kafka",
-                "/opt/kafka/bin/kafka-topics.sh",
-                "--bootstrap-server", "localhost:9092",
+                str(bat),
+                "--bootstrap-server", KAFKA_BOOTSTRAP,
                 "--create", "--if-not-exists",
                 "--topic", topic,
                 "--partitions", str(cfg["num_partitions"]),
-                "--replication-factor", str(cfg["replication_factor"]),
-                "--config", "retention.ms=604800000",  # 7 days — replay window for backfills (D9)
+                "--replication-factor", "1",
+                "--config", f"retention.ms={RETENTION_MS}",
             ],
             check=True,
+            capture_output=True,
+            text=True,
         )
         print(f"topic ready: {topic}")
 

@@ -1,14 +1,14 @@
 # Runbook
 
-Day-to-day operation. First-time setup: see README quickstart.
+Day-to-day operation, native Windows. First-time setup: see README quickstart.
 
 ## Bring the stack up / down
 
-```bash
-docker compose up -d          # start everything
-docker compose ps             # verify: kafka, schema-registry, jobmanager, taskmanager, minio, postgres
-docker compose down           # stop (keeps volumes)
-docker compose down -v        # stop and wipe all state
+```powershell
+.\scripts\download_runtimes.ps1     # one-time: fetch Kafka/Flink/Schema Registry tarballs
+.\scripts\start_stack.ps1           # start kafka (9092), schema-registry (8081), flink (8082)
+.\scripts\stop_stack.ps1            # stop everything
+.\scripts\stop_stack.ps1 -wipe      # stop AND delete all state (kafka logs, iceberg, duckdb)
 ```
 
 Ports:
@@ -17,36 +17,44 @@ Ports:
 |---|---|
 | Flink UI | http://localhost:8082 |
 | Schema Registry | http://localhost:8081 |
-| MinIO console | http://localhost:9001 (minioadmin/minioadmin) |
 | Dagster | http://localhost:3000 |
 | Kafka | localhost:9092 |
 
+Log files land in `.state\logs\` when start_stack.ps1 launches processes.
+
 ## Produce / inspect events
 
-```bash
-python producer/generate.py --rate 50            # steady traffic
-python producer/generate.py --rate 50 --chaos    # + late events, duplicates
+```powershell
+python producer\generate.py --rate 50            # steady traffic
+python producer\generate.py --rate 50 --chaos    # + late events, duplicates
 
 # watch the orders topic
-docker exec dsl-kafka /opt/kafka/bin/kafka-console-consumer.sh \
+& "$env:KAFKA_HOME\bin\windows\kafka-console-consumer.bat" `
   --bootstrap-server localhost:9092 --topic orders --from-beginning --max-messages 5
 
 # consumer lag (is Flink keeping up?)
-docker exec dsl-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+& "$env:KAFKA_HOME\bin\windows\kafka-consumer-groups.bat" `
   --bootstrap-server localhost:9092 --describe --group flink-to-iceberg
 ```
 
 ## Flink jobs
 
-```bash
-docker exec dsl-jobmanager flink run -py /opt/jobs/realtime_metrics.py
-docker exec dsl-jobmanager flink run -py /opt/jobs/orders_to_iceberg.py
-# cancel: grab Job ID from the UI (localhost:8082), then
-docker exec dsl-jobmanager flink cancel <job-id>
+```powershell
+# SQL jobs (windows job + iceberg sink) via the TableEnvironment gateway:
+python flink\iceberg_sink\submit_sql_windows.py flink\sql\realtime_metrics.sql
+python flink\iceberg_sink\submit_sql_windows.py flink\iceberg_sink\orders_to_iceberg.sql
+
+# cancel: Flink UI (localhost:8082) → job → Cancel
 ```
 
 Checkpoints are the exactly-once spine (D5): if a job restarts, verify the
 checkpoint history in the UI shows completed checkpoints before trusting counts.
+
+## Iceberg tables
+
+Warehouse root: `lakehouse\` in the repo (Hadoop catalog, `file:///` URIs).
+Inspect snapshots with DuckDB's iceberg extension or via Flink SQL
+(`SELECT * FROM lake.raw.orders VERSION AS OF <snapshot-id>`).
 
 ## Incident: marts look wrong
 
@@ -54,9 +62,12 @@ checkpoint history in the UI shows completed checkpoints before trusting counts.
 2. Consumer lag check above — is the pipeline just behind?
 3. Kafka replay is the repair path (D9): the topic holds 7 days. See
    `orchestration/definitions.py::backfill_window`.
-4. Iceberg time travel for forensics: `SELECT * FROM lake.raw.orders VERSION AS OF <snapshot-id>`.
+4. Iceberg time travel for forensics: snapshot queries above.
 
-## Incident: Docker won't start
+## Incident: a service won't start
 
-Stack needs ~4 GB RAM for Docker Desktop (WSL2 backend). If the taskmanager
-crash-loops, lower `taskmanager.numberOfTaskSlots` to 2 in docker-compose.yml.
+* Kafka on first run formats its KRaft storage into `.state\kafka-logs` —
+  if that dir is half-written (crashed first run), `stop_stack.ps1 -wipe` and retry.
+* Flink UI down: check `runtimes\flink*\log\` next to the tarball extraction.
+* Schema Registry down: it needs Kafka up first — start order matters
+  (start_stack.ps1 handles it; manual starts must too).

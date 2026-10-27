@@ -13,7 +13,8 @@ dbt/logs/
 warehouse.duckdb
 *.duckdb.wal
 lakehouse/
-checkpoints/
+.state/
+runtimes/
 
 # dagster
 dagster_home/
