@@ -1,0 +1,14 @@
+{
+  "type": "record",
+  "name": "rider_location",
+  "namespace": "com.dsl.riders",
+  "doc": "Rider GPS ping. High volume, at-least-once, latest-position-wins.",
+  "fields": [
+    { "name": "rider_id",   "type": "string" },
+    { "name": "order_id",   "type": ["null", "string"], "default": null,
+      "doc": "null when idle" },
+    { "name": "lat",        "type": "double" },
+    { "name": "lon",        "type": "double" },
+    { "name": "event_ts",   "type": { "type": "long", "logicalType": "timestamp-millis" } }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "order_event",
+  "namespace": "com.dsl.orders",
+  "doc": "Order lifecycle event. v1: created, confirmed, picked_up, delivered, cancelled.",
+  "fields": [
+    { "name": "event_id",      "type": "string",  "doc": "uuid, dedup key" },
+    { "name": "order_id",      "type": "string" },
+    { "name": "restaurant_id", "type": "string" },
+    { "name": "customer_id",   "type": "string" },
+    { "name": "event_type",    "type": { "type": "enum", "name": "order_event_type",
+      "symbols": ["created", "confirmed", "picked_up", "delivered", "cancelled"] } },
+    { "name": "order_value",   "type": "double",  "doc": "INR" },
+    { "name": "event_ts",      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "event time at source, ms epoch" }
+  ]
+}

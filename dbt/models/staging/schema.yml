@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: "Deduplicated order events, one row per event_id."
+    columns:
+      - name: event_id
+        description: "Producer uuid; primary key after dedup."
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              values: ['created', 'confirmed', 'picked_up', 'delivered', 'cancelled']
+      - name: order_value
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"

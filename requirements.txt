@@ -1,0 +1,9 @@
+# Host-side Python deps (run inside a 3.11 venv — PyFlink doesn't support 3.14).
+# Flink jobs themselves run inside the Flink containers, not on the host.
+
+fastavro>=1.9
+requests>=2.31
+confluent-kafka>=2.3
+duckdb>=1.0
+dagster>=1.7
+dbt-duckdb>=1.8
