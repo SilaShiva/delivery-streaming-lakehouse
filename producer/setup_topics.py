@@ -41,39 +41,61 @@ SUBJECTS = {
 RETENTION_MS = "604800000"  # 7 days — replay window for backfills (D9)
 
 
-def kafka_topics_bat() -> pathlib.Path:
+def _parse_runtimes_env() -> dict[str, str]:
+    """Read scripts/runtimes.env.ps1 into a plain dict, resolving $PSScriptRoot."""
     env_file = REPO_ROOT / "scripts" / "runtimes.env.ps1"
     if not env_file.exists():
         sys.exit("scripts/runtimes.env.ps1 not found — run scripts/download_runtimes.ps1 first")
-    env = {}
-    for line in env_file.read_text().splitlines():
-        line = line.strip().lstrip("$")
-        if "=" in line:
-            k, v = line.split("=", 1)
-            env[k] = v.strip('"')
+    env: dict[str, str] = {}
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if "=" not in line or line.startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        key = key.replace("$", "").strip()
+        value = value.strip().strip('"')
+        value = value.replace("$PSScriptRoot\\..\\", str(REPO_ROOT) + "\\")
+        value = value.replace("$PSScriptRoot", str(REPO_ROOT))
+        env[key] = value
+    return env
+
+
+def kafka_topics_bat() -> pathlib.Path:
+    """Resolve kafka-topics from the local install (kept for reference)."""
+    env = _parse_runtimes_env()
     bat = pathlib.Path(env["KAFKA_HOME"]) / "bin" / "windows" / "kafka-topics.bat"
     if not bat.exists():
         sys.exit(f"kafka-topics.bat not found at {bat}")
     return bat
 
 
+def _java_topics_cmd(args: list[str]) -> list[str]:
+    """kafka-topics via direct java launch (wildcard classpath, no cmd limit)."""
+    env = _parse_runtimes_env()
+    java = pathlib.Path(env["JAVA_HOME"]) / "bin" / "java.exe"
+    kafka_home = pathlib.Path(env["KAFKA_HOME"])
+    return [
+        str(java), "-cp", str(kafka_home / "libs" / "*"),
+        "org.apache.kafka.tools.TopicCommand", *args,
+    ]
+
+
 def create_topics() -> None:
-    bat = kafka_topics_bat()
     for topic, cfg in TOPICS.items():
-        subprocess.run(
-            [
-                str(bat),
-                "--bootstrap-server", KAFKA_BOOTSTRAP,
-                "--create", "--if-not-exists",
-                "--topic", topic,
-                "--partitions", str(cfg["num_partitions"]),
-                "--replication-factor", "1",
-                "--config", f"retention.ms={RETENTION_MS}",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        args = [
+            "--bootstrap-server", KAFKA_BOOTSTRAP,
+            "--create", "--if-not-exists",
+            "--topic", topic,
+            "--partitions", str(cfg["num_partitions"]),
+            "--replication-factor", "1",
+            "--config", f"retention.ms={RETENTION_MS}",
+        ]
+        # Direct java launch — the .bat dies on cmd.exe's 32KB command limit
+        # (109 jars expanded into CLASSPATH, D11).
+        cmd = _java_topics_cmd(args)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0 and "already exists" not in (result.stderr or ""):
+            sys.exit(f"topic creation failed for {topic}: {result.stderr[-500:]}")
         print(f"topic ready: {topic}")
 
 
